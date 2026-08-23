@@ -249,16 +249,16 @@ function App() {
     setShowUserModal(false)
     resetUserForm()
 
-    // 2. BACKGROUND DATABASE SYNC (Non-blocking)
-    (async () => {
-      try {
-        if (userFormData.id) {
-          await supabase.from('users').update(payload).eq('id', userFormData.id)
-        } else {
-          await supabase.from('users').insert([payload])
-        }
-      } catch (err) {}
-    })()
+      // 2. BACKGROUND DATABASE SYNC (Non-blocking)
+      (async () => {
+        try {
+          if (userFormData.id) {
+            await supabase.from('users').update(payload).eq('id', userFormData.id)
+          } else {
+            await supabase.from('users').insert([payload])
+          }
+        } catch (err) { }
+      })()
   }
 
   const handleDeleteUser = async (userId) => {
@@ -274,7 +274,7 @@ function App() {
             action: 'Deleted User',
             new_values: JSON.stringify({ user_id: userId })
           }])
-        } catch (ae) {}
+        } catch (ae) { }
       }
 
       const localUsers = getStoredItems('sgc_portal_local_users').filter(u => u.id !== userId)
@@ -516,16 +516,16 @@ function App() {
     setShowAddModal(false)
     setFormData({ id: null, name: '', category_id: categories[0]?.id, department_id: departments[0]?.id, description: '', documentation_url: '' })
 
-    // 2. BACKGROUND DATABASE SYNC (Non-blocking)
-    (async () => {
-      try {
-        if (formData.id) {
-          await supabase.from('systems').update(systemData).eq('id', formData.id)
-        } else {
-          await supabase.from('systems').insert([systemData])
-        }
-      } catch (err) {}
-    })()
+      // 2. BACKGROUND DATABASE SYNC (Non-blocking)
+      (async () => {
+        try {
+          if (formData.id) {
+            await supabase.from('systems').update(systemData).eq('id', formData.id)
+          } else {
+            await supabase.from('systems').insert([systemData])
+          }
+        } catch (err) { }
+      })()
   }
 
   const handleOpenEditSystem = async (id) => {
