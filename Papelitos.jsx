@@ -225,14 +225,16 @@ export default function Papelitos() {
     setLoading(true);
     setErrorMsg(null);
     let remoteData = [];
+    let fetchedOk = false;
     try {
       let { data, error } = await supabase
         .from('papelitos')
         .select('*')
-        .eq('is_deleted', false)
+        .neq('is_deleted', true)
         .order('created_at', { ascending: false });
 
       if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+        // is_deleted column may not exist — fetch all and filter locally
         const fallback = await supabase
           .from('papelitos')
           .select('*')
@@ -253,12 +255,25 @@ export default function Papelitos() {
       } else {
         setDbStatus('connected');
         remoteData = data || [];
+        fetchedOk = true;
       }
     } catch (err) {
       console.error('Fetch error:', err);
       setDbStatus('error');
     } finally {
       const localItems = getStoredItems('sgc_portal_local_papelitos');
+      const remoteIds = new Set(remoteData.map(r => r.id));
+
+      // Detect local-only records (temp IDs or IDs not found in remote DB) and sync them
+      if (fetchedOk) {
+        const unsynced = localItems.filter(item =>
+          item && item.id && !item.is_deleted && !remoteIds.has(item.id)
+        );
+        if (unsynced.length > 0) {
+          syncLocalRecordsToDb(unsynced, localItems);
+        }
+      }
+
       const mergedMap = new Map();
       remoteData.forEach(item => mergedMap.set(item.id, item));
       localItems.forEach(item => {
@@ -276,6 +291,61 @@ export default function Papelitos() {
       setLoading(false);
     }
   };
+
+  // Sync local-only records that never made it to Supabase
+  const syncLocalRecordsToDb = async (unsyncedItems, allLocalItems) => {
+    let localCopy = [...allLocalItems];
+    for (const item of unsyncedItems) {
+      try {
+        const { id: tempId, ...rest } = item;
+        const insertPayload = {
+          name: rest.name,
+          company_name: rest.company_name,
+          quantity: rest.quantity,
+          date_received: rest.date_received,
+          payment_status: rest.payment_status,
+          status: rest.status,
+          remarks: rest.remarks || null,
+          created_at: rest.created_at || new Date().toISOString(),
+          updated_at: rest.updated_at || new Date().toISOString(),
+          is_deleted: false,
+          ...(rest.date_paid ? { date_paid: rest.date_paid } : {}),
+          ...(rest.date_returned ? { date_returned: rest.date_returned } : {}),
+        };
+
+        let { data, error } = await supabase
+          .from('papelitos')
+          .insert([insertPayload])
+          .select()
+          .single();
+
+        // Fallback: if is_deleted column doesn't exist
+        if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+          const { is_deleted, ...noDeletedPayload } = insertPayload;
+          const fallback = await supabase
+            .from('papelitos')
+            .insert([noDeletedPayload])
+            .select()
+            .single();
+          data = fallback.data;
+          error = fallback.error;
+        }
+
+        if (!error && data) {
+          // Replace temp ID with real DB ID in localStorage
+          localCopy = localCopy.map(li => li.id === tempId ? data : li);
+          setStoredItems('sgc_portal_local_papelitos', localCopy);
+          setPapelitosList(prev => prev.map(li => li.id === tempId ? data : li));
+          console.log(`[Sync] Local record "${tempId}" synced to DB as "${data.id}"`);
+        } else if (error) {
+          console.warn(`[Sync] Failed to sync record "${tempId}":`, error.message);
+        }
+      } catch (syncErr) {
+        console.warn('[Sync] Error during local record sync:', syncErr);
+      }
+    }
+  };
+
 
   // Clear all database records
   const handleClearAllData = async () => {
@@ -589,8 +659,9 @@ export default function Papelitos() {
             .select()
             .single();
 
-          if (error && error.message?.includes('is_deleted')) {
-            const { is_deleted, ...payloadNoDeleted } = payload;
+          if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+            // is_deleted column doesn't exist in this DB — insert without it
+            const { is_deleted, ...payloadNoDeleted } = { ...payload, created_at: tempRecord.created_at };
             const fallback = await supabase
               .from('papelitos')
               .insert([payloadNoDeleted])
@@ -724,7 +795,10 @@ export default function Papelitos() {
         if (editingRecord) {
           await supabase.from('papelitos').update(payload).eq('id', editingRecord.id);
         } else {
-          await supabase.from('papelitos').insert([{ ...payload, created_at: tempRecord.created_at }]);
+          let { error } = await supabase.from('papelitos').insert([{ ...payload, created_at: tempRecord.created_at, is_deleted: false }]);
+          if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+            await supabase.from('papelitos').insert([{ ...payload, created_at: tempRecord.created_at }]);
+          }
         }
       } catch (err) { }
     })();
