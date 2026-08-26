@@ -539,7 +539,7 @@ export default function Papelitos() {
       quantity: 1,
       date_received: new Date().toISOString().split('T')[0],
       payment_status: 'Unpaid',
-      status: 'Unreturned',
+      status: 'Returned',
       remarks: ''
     });
     setFormErrors({});
@@ -565,7 +565,7 @@ export default function Papelitos() {
   // Form Validation
   const validateForm = () => {
     const errors = {};
-    if (!formData.name.trim()) errors.name = 'Person Name is required.';
+    if (!formData.name.trim()) errors.name = 'Name is required.';
     if (!formData.company_name.trim()) errors.company_name = 'Company Name is required.';
 
     const qty = Number(formData.quantity);
