@@ -17,6 +17,7 @@ import {
   Download,
   MoreVertical,
   X,
+  Menu,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -78,6 +79,7 @@ const ALL_MODULES = [
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'classic')
   const [showAddModal, setShowAddModal] = useState(false)
   const [showCatModal, setShowCatModal] = useState(false)
@@ -1149,8 +1151,23 @@ function App() {
 
   return (
     <div className="layout-container">
+      {/* Mobile hamburger toggle */}
+      <button
+        className="mobile-menu-btn"
+        onClick={() => setIsSidebarOpen(o => !o)}
+        aria-label={isSidebarOpen ? 'Close menu' : 'Open menu'}
+      >
+        {isSidebarOpen ? <X size={22} /> : <Menu size={22} />}
+      </button>
+
+      {/* Overlay backdrop (mobile only) */}
+      <div
+        className={`sidebar-overlay ${isSidebarOpen ? 'visible' : ''}`}
+        onClick={() => setIsSidebarOpen(false)}
+      />
+
       {/* Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${isSidebarOpen ? 'sidebar-open' : ''}`}>
         <div className="logo" onClick={() => setActiveTab('dashboard')} style={{ cursor: 'pointer' }}>
           <div className="logo-icon" style={{ background: 'transparent' }}>
             <img src="logo.png" alt="Logo" style={{ width: '50px', height: '50px', objectFit: 'contain' }} />
@@ -1165,7 +1182,7 @@ function App() {
               <div
                 key={m.id}
                 className={`nav-item ${activeTab === m.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(m.id)}
+                onClick={() => { setActiveTab(m.id); setIsSidebarOpen(false) }}
               >
                 <ModIcon size={20} />
                 <span>{m.label}</span>
@@ -1176,7 +1193,7 @@ function App() {
 
         <div style={{ marginTop: 'auto' }} className="nav-links">
           {(currentUser?.allowed_tabs || ALL_MODULES.map(x => x.id)).includes('settings') && (
-            <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+            <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false) }}>
               <Settings size={20} />
               <span>System Settings</span>
             </div>
