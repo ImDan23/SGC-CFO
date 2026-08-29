@@ -5,9 +5,9 @@ export default function Settings({ theme, onThemeChange }) {
     <div className="settings-view">
       <div className="glass-card" style={{ padding: '2rem' }}>
         <h2 style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
-          System Settings
+          System Setting
         </h2>
-        
+
         <div className="form-group" style={{ maxWidth: '400px' }}>
           <label style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '1rem', display: 'block' }}>Theme Preference</label>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -21,7 +21,7 @@ export default function Settings({ theme, onThemeChange }) {
               { id: 'amethyst', label: 'Amethyst Purple' },
               { id: 'fern', label: 'Fern Green' }
             ].map(t => (
-              <button 
+              <button
                 key={t.id}
                 className={`btn ${theme === t.id ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => onThemeChange(t.id)}

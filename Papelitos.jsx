@@ -23,7 +23,8 @@ import {
   ArrowUpDown,
   Check,
   Tag,
-  Printer
+  Printer,
+  Loader2
 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { supabase } from './lib/supabase';
@@ -147,6 +148,8 @@ export default function Papelitos() {
 
   // Active Navigation View Mode inside module
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'reports'
+
+  const [isSaving, setIsSaving] = useState(false);
 
   // Multi-Select Filter Buttons: Array of active filter keys e.g. ['unpaid', 'unreturned']
   const [selectedFilters, setSelectedFilters] = useState([]);
@@ -581,10 +584,11 @@ export default function Papelitos() {
     return Object.keys(errors).length === 0;
   };
 
-  // Save Record (Add or Edit) - 0ms Optimistic Save
-  const handleSaveForm = (e) => {
+  // Save Record (Add or Edit) - Direct to Online Database
+  const handleSaveForm = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!validateForm()) return;
+    setIsSaving(true);
 
     const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Unreturned';
 
@@ -606,101 +610,90 @@ export default function Papelitos() {
       payload.date_returned = new Date().toISOString();
     }
 
-    const tempRecord = editingRecord
-      ? { ...editingRecord, ...payload }
-      : {
-        id: `p-${Date.now()}`,
-        created_at: new Date().toISOString(),
-        is_deleted: false,
-        ...payload
-      };
+    try {
+      let savedData;
+      if (editingRecord) {
+        const { data, error } = await supabase
+          .from('papelitos')
+          .update(payload)
+          .eq('id', editingRecord.id)
+          .select()
+          .single();
 
-    // 1. INSTANT OPTIMISTIC UI & LOCALSTORAGE UPDATE (0ms delay!)
-    const localItems = getStoredItems('sgc_portal_local_papelitos');
-    const updatedLocal = editingRecord
-      ? localItems.map(item => item.id === tempRecord.id ? tempRecord : item)
-      : [tempRecord, ...localItems.filter(item => item.id !== tempRecord.id)];
-    setStoredItems('sgc_portal_local_papelitos', updatedLocal);
-
-    setPapelitosList(prev => {
-      const exists = prev.some(item => item.id === tempRecord.id);
-      if (exists) {
-        return prev.map(item => item.id === tempRecord.id ? tempRecord : item);
+        if (error) throw error;
+        savedData = data;
       } else {
-        return [tempRecord, ...prev];
-      }
-    });
+        const tempId = `p-${Date.now()}`;
+        const insertPayload = {
+          ...payload,
+          id: tempId,
+          created_at: new Date().toISOString(),
+          is_deleted: false
+        };
 
-    setShowAddEditModal(false);
-    showNotification(editingRecord ? 'Record updated successfully!' : 'New Papelitos record created successfully!');
+        let { data, error } = await supabase
+          .from('papelitos')
+          .insert([insertPayload])
+          .select()
+          .single();
 
-    logAudit(editingRecord ? 'Update Record' : 'Create Record', tempRecord.id, editingRecord, payload);
-
-    if (formData.payment_status === 'Paid') {
-      generateCashVoucherPDF([tempRecord]);
-    }
-
-    // 2. BACKGROUND DATABASE SYNC (Non-blocking)
-    (async () => {
-      try {
-        if (editingRecord) {
-          const { data, error } = await supabase
+        if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+          const { is_deleted, ...payloadNoDeleted } = insertPayload;
+          const fallback = await supabase
             .from('papelitos')
-            .update(payload)
-            .eq('id', editingRecord.id)
+            .insert([payloadNoDeleted])
             .select()
             .single();
-
-          if (!error && data) setDbStatus('connected');
-        } else {
-          let { data, error } = await supabase
-            .from('papelitos')
-            .insert([{ ...payload, created_at: tempRecord.created_at, is_deleted: false }])
-            .select()
-            .single();
-
-          if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
-            // is_deleted column doesn't exist in this DB — insert without it
-            const { is_deleted, ...payloadNoDeleted } = { ...payload, created_at: tempRecord.created_at };
-            const fallback = await supabase
-              .from('papelitos')
-              .insert([payloadNoDeleted])
-              .select()
-              .single();
-            data = fallback.data;
-            error = fallback.error;
-          }
-
-          if (!error && data) {
-            setDbStatus('connected');
-            if (data.id && data.id !== tempRecord.id) {
-              const currentLocal = getStoredItems('sgc_portal_local_papelitos');
-              const syncedLocal = currentLocal.map(item => item.id === tempRecord.id ? data : item);
-              setStoredItems('sgc_portal_local_papelitos', syncedLocal);
-              setPapelitosList(prev => prev.map(item => item.id === tempRecord.id ? data : item));
-            }
-          } else if (error) {
-            if (error.code === 'PGRST205' || error.message?.includes('does not exist')) {
-              setDbStatus('table_missing');
-            } else if (error.code === '42501' || error.message?.includes('row-level security')) {
-              setDbStatus('rls_blocked');
-            }
-          }
+          data = fallback.data;
+          error = fallback.error;
         }
-      } catch (dbErr) {
-        console.warn('Background database sync warning:', dbErr);
+
+        if (error) throw error;
+        savedData = data;
       }
-    })();
+
+      setDbStatus('connected');
+
+      // Update Local State & Storage with confirmed data
+      const localItems = getStoredItems('sgc_portal_local_papelitos');
+      const updatedLocal = editingRecord
+        ? localItems.map(item => item.id === savedData.id ? savedData : item)
+        : [savedData, ...localItems.filter(item => item.id !== savedData.id)];
+      setStoredItems('sgc_portal_local_papelitos', updatedLocal);
+
+      setPapelitosList(prev => {
+        const exists = prev.some(item => item.id === savedData.id);
+        if (exists) {
+          return prev.map(item => item.id === savedData.id ? savedData : item);
+        } else {
+          return [savedData, ...prev];
+        }
+      });
+
+      setShowAddEditModal(false);
+      showNotification(editingRecord ? 'Record updated successfully!' : 'New Papelitos record created successfully!');
+      logAudit(editingRecord ? 'Update Record' : 'Create Record', savedData.id, editingRecord, payload);
+
+      if (formData.payment_status === 'Paid') {
+        generateCashVoucherPDF([savedData]);
+      }
+    } catch (error) {
+      console.error('Error saving data directly to online database:', error);
+      showNotification(`Failed to save to database: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Save Draft & Add Another
-  const handleSaveDraftAndAddAnother = (e) => {
+  const handleSaveDraftAndAddAnother = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!validateForm()) return;
+    setIsSaving(true);
 
     const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Unreturned';
 
-    const payload = {
+    const insertPayload = {
       name: formData.name.trim(),
       company_name: formData.company_name.trim(),
       quantity: Number(formData.quantity),
@@ -708,39 +701,56 @@ export default function Papelitos() {
       payment_status: formData.payment_status,
       status: computedStatus,
       remarks: formData.remarks.trim() || null,
+      id: `p-${Date.now()}`,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       is_deleted: false
     };
 
-    const tempRecord = { id: `p-${Date.now()}`, ...payload };
+    try {
+      let { data, error } = await supabase.from('papelitos').insert([insertPayload]).select().single();
+      
+      if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+        const { is_deleted, ...payloadNoDeleted } = insertPayload;
+        const fallback = await supabase
+          .from('papelitos')
+          .insert([payloadNoDeleted])
+          .select()
+          .single();
+        data = fallback.data;
+        error = fallback.error;
+      }
+      if (error) throw error;
+      
+      const savedData = data;
+      const localItems = getStoredItems('sgc_portal_local_papelitos');
+      setStoredItems('sgc_portal_local_papelitos', [savedData, ...localItems]);
+      setPapelitosList(prev => [savedData, ...prev]);
 
-    const localItems = getStoredItems('sgc_portal_local_papelitos');
-    setStoredItems('sgc_portal_local_papelitos', [tempRecord, ...localItems]);
-    setPapelitosList(prev => [tempRecord, ...prev]);
+      addToVoucherQueue(savedData);
+      showNotification(`Voucher draft for "${savedData.name}" saved to database & added to Print Queue!`);
 
-    addToVoucherQueue(tempRecord);
-    showNotification(`Voucher draft for "${tempRecord.name}" saved & added to Print Queue!`);
-
-    setFormData(prev => ({
-      ...prev,
-      name: '',
-      quantity: 1,
-      remarks: ''
-    }));
-    setFormErrors({});
-
-    (async () => {
-      try {
-        await supabase.from('papelitos').insert([payload]);
-      } catch (err) { }
-    })();
+      setFormData(prev => ({
+        ...prev,
+        name: '',
+        quantity: 1,
+        remarks: ''
+      }));
+      setFormErrors({});
+      setDbStatus('connected');
+    } catch (error) {
+      console.error('Error saving data directly to online database:', error);
+      showNotification(`Failed to save to database: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Save Draft & Open A4 Print Preview Modal
-  const handleSaveAndOpenPrintPreview = (e) => {
+  const handleSaveAndOpenPrintPreview = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!validateForm()) return;
+    setIsSaving(true);
 
     const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Unreturned';
 
@@ -755,53 +765,75 @@ export default function Papelitos() {
       updated_at: new Date().toISOString()
     };
 
-    const tempRecord = editingRecord
-      ? { ...editingRecord, ...payload }
-      : {
-        id: `p-${Date.now()}`,
-        created_at: new Date().toISOString(),
-        is_deleted: false,
-        ...payload
-      };
-
-    const localItems = getStoredItems('sgc_portal_local_papelitos');
-    const updatedLocal = editingRecord
-      ? localItems.map(item => item.id === tempRecord.id ? tempRecord : item)
-      : [tempRecord, ...localItems.filter(item => item.id !== tempRecord.id)];
-    setStoredItems('sgc_portal_local_papelitos', updatedLocal);
-
-    setPapelitosList(prev => {
-      const exists = prev.some(item => item.id === tempRecord.id);
-      if (exists) {
-        return prev.map(item => item.id === tempRecord.id ? tempRecord : item);
+    try {
+      let savedData;
+      if (editingRecord) {
+        const { data, error } = await supabase
+          .from('papelitos')
+          .update(payload)
+          .eq('id', editingRecord.id)
+          .select()
+          .single();
+        if (error) throw error;
+        savedData = data;
       } else {
-        return [tempRecord, ...prev];
+        const insertPayload = {
+          ...payload,
+          id: `p-${Date.now()}`,
+          created_at: new Date().toISOString(),
+          is_deleted: false
+        };
+        let { data, error } = await supabase
+          .from('papelitos')
+          .insert([insertPayload])
+          .select()
+          .single();
+        if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
+          const { is_deleted, ...payloadNoDeleted } = insertPayload;
+          const fallback = await supabase
+            .from('papelitos')
+            .insert([payloadNoDeleted])
+            .select()
+            .single();
+          data = fallback.data;
+          error = fallback.error;
+        }
+        if (error) throw error;
+        savedData = data;
       }
-    });
 
-    const updatedQueue = [...voucherQueue.filter(i => i.id !== tempRecord.id), tempRecord];
-    setVoucherQueue(updatedQueue);
-    setShowAddEditModal(false);
+      setDbStatus('connected');
 
-    generateCashVoucherPDF(updatedQueue, false).then(previewUrl => {
+      const localItems = getStoredItems('sgc_portal_local_papelitos');
+      const updatedLocal = editingRecord
+        ? localItems.map(item => item.id === savedData.id ? savedData : item)
+        : [savedData, ...localItems.filter(item => item.id !== savedData.id)];
+      setStoredItems('sgc_portal_local_papelitos', updatedLocal);
+
+      setPapelitosList(prev => {
+        const exists = prev.some(item => item.id === savedData.id);
+        if (exists) {
+          return prev.map(item => item.id === savedData.id ? savedData : item);
+        } else {
+          return [savedData, ...prev];
+        }
+      });
+
+      const updatedQueue = [...voucherQueue.filter(i => i.id !== savedData.id), savedData];
+      setVoucherQueue(updatedQueue);
+      setShowAddEditModal(false);
+
+      const previewUrl = await generateCashVoucherPDF(updatedQueue, false);
       if (previewUrl) {
         setPreviewPdfUrl(previewUrl);
         setShowPrintPreviewModal(true);
       }
-    });
-
-    (async () => {
-      try {
-        if (editingRecord) {
-          await supabase.from('papelitos').update(payload).eq('id', editingRecord.id);
-        } else {
-          let { error } = await supabase.from('papelitos').insert([{ ...payload, created_at: tempRecord.created_at, is_deleted: false }]);
-          if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
-            await supabase.from('papelitos').insert([{ ...payload, created_at: tempRecord.created_at }]);
-          }
-        }
-      } catch (err) { }
-    })();
+    } catch (error) {
+      console.error('Error saving data directly to online database:', error);
+      showNotification(`Failed to save to database: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Open A4 Print Preview Modal directly from Queue toolbar button
@@ -2609,13 +2641,13 @@ export default function Papelitos() {
                   CANCEL
                 </button>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button type="submit" className="btn btn-secondary" style={{ padding: '0.55rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '600' }}>
-                    <Check size={16} />
-                    <span>SAVE</span>
+                  <button type="submit" disabled={isSaving} className="btn btn-secondary" style={{ padding: '0.55rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '600' }}>
+                    {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                    <span>{isSaving ? 'SAVING...' : 'SAVE'}</span>
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={handleSaveAndOpenPrintPreview} style={{ padding: '0.55rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '600' }}>
-                    <Printer size={16} />
-                    <span>SAVE & PRINT</span>
+                  <button type="button" disabled={isSaving} className="btn btn-primary" onClick={handleSaveAndOpenPrintPreview} style={{ padding: '0.55rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '600' }}>
+                    {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />}
+                    <span>{isSaving ? 'SAVING...' : 'SAVE & PRINT'}</span>
                   </button>
                 </div>
               </div>
