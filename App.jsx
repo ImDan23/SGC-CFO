@@ -1211,7 +1211,7 @@ function App() {
           <div>
             <h1 className="page-title">
               {activeTab === 'dashboard' ? 'System Dashboard' :
-                activeTab === 'directory' ? 'Systems Directory' :
+                activeTab === 'directory' ? 'System Directory' :
                   activeTab === 'audit' ? 'Audit History' :
                     activeTab === 'users' ? 'Access Control' :
                       activeTab === 'settings' ? 'Settings' :
