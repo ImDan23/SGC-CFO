@@ -65,7 +65,7 @@ const setStoredItems = (key, items) => {
 
 const ALL_MODULES = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'directory', label: 'Systems Directory', icon: Database },
+  { id: 'directory', label: 'System Directory', icon: Database },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'extractor', label: 'Text Extractor', icon: FileText },
   { id: 'pdf-editor', label: 'PDF Editor', icon: FileEdit },
