@@ -29,23 +29,6 @@ import {
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { supabase } from './lib/supabase';
 
-const getStoredItems = (key) => {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-  } catch (e) {
-    console.error('Error reading localStorage key ' + key, e);
-    return [];
-  }
-};
-
-const setStoredItems = (key, items) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(items));
-  } catch (e) {
-    console.error('Error writing localStorage key ' + key, e);
-  }
-};
 
 // Color palette for Company Report matching exact image styling (Green, Pink/Magenta, Coral/Red, Soft Blue, Yellow, Purple, Teal)
 const COMPANY_ROW_COLORS = [
@@ -75,9 +58,6 @@ function getMonthInfo(filterMonth) {
     title: `${monthName} (${daysCount} DAYS)`
   };
 }
-
-// Initial Sample Data (default empty)
-const INITIAL_MOCK_PAPELITOS = [];
 
 // Helper to generate initials from full name
 function getInitials(name) {
@@ -264,88 +244,10 @@ export default function Papelitos() {
       console.error('Fetch error:', err);
       setDbStatus('error');
     } finally {
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      const remoteIds = new Set(remoteData.map(r => r.id));
-
-      // Detect local-only records (temp IDs or IDs not found in remote DB) and sync them
       if (fetchedOk) {
-        const unsynced = localItems.filter(item =>
-          item && item.id && !item.is_deleted && !remoteIds.has(item.id)
-        );
-        if (unsynced.length > 0) {
-          syncLocalRecordsToDb(unsynced, localItems);
-        }
+        setPapelitosList(remoteData);
       }
-
-      const mergedMap = new Map();
-      remoteData.forEach(item => mergedMap.set(item.id, item));
-      localItems.forEach(item => {
-        if (item && item.id) {
-          const existing = mergedMap.get(item.id);
-          if (existing) {
-            mergedMap.set(item.id, { ...existing, ...item });
-          } else if (!item.is_deleted) {
-            mergedMap.set(item.id, item);
-          }
-        }
-      });
-      const finalPapelitos = Array.from(mergedMap.values()).filter(i => !i.is_deleted);
-      setPapelitosList(finalPapelitos);
       setLoading(false);
-    }
-  };
-
-  // Sync local-only records that never made it to Supabase
-  const syncLocalRecordsToDb = async (unsyncedItems, allLocalItems) => {
-    let localCopy = [...allLocalItems];
-    for (const item of unsyncedItems) {
-      try {
-        const { id: tempId, ...rest } = item;
-        const insertPayload = {
-          name: rest.name,
-          company_name: rest.company_name,
-          quantity: rest.quantity,
-          date_received: rest.date_received,
-          payment_status: rest.payment_status,
-          status: rest.status,
-          remarks: rest.remarks || null,
-          created_at: rest.created_at || new Date().toISOString(),
-          updated_at: rest.updated_at || new Date().toISOString(),
-          is_deleted: false,
-          ...(rest.date_paid ? { date_paid: rest.date_paid } : {}),
-          ...(rest.date_returned ? { date_returned: rest.date_returned } : {}),
-        };
-
-        let { data, error } = await supabase
-          .from('papelitos')
-          .insert([insertPayload])
-          .select()
-          .single();
-
-        // Fallback: if is_deleted column doesn't exist
-        if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
-          const { is_deleted, ...noDeletedPayload } = insertPayload;
-          const fallback = await supabase
-            .from('papelitos')
-            .insert([noDeletedPayload])
-            .select()
-            .single();
-          data = fallback.data;
-          error = fallback.error;
-        }
-
-        if (!error && data) {
-          // Replace temp ID with real DB ID in localStorage
-          localCopy = localCopy.map(li => li.id === tempId ? data : li);
-          setStoredItems('sgc_portal_local_papelitos', localCopy);
-          setPapelitosList(prev => prev.map(li => li.id === tempId ? data : li));
-          console.log(`[Sync] Local record "${tempId}" synced to DB as "${data.id}"`);
-        } else if (error) {
-          console.warn(`[Sync] Failed to sync record "${tempId}":`, error.message);
-        }
-      } catch (syncErr) {
-        console.warn('[Sync] Error during local record sync:', syncErr);
-      }
     }
   };
 
@@ -365,14 +267,11 @@ export default function Papelitos() {
       if (error) {
         console.warn('Delete error:', error.message);
       }
-      setStoredItems('sgc_portal_local_papelitos', []);
       setPapelitosList([]);
       showNotification('All Papelitos records cleared.');
     } catch (err) {
       console.error('Clear DB error:', err);
-      setStoredItems('sgc_portal_local_papelitos', []);
-      setPapelitosList([]);
-      showNotification('Local records cleared.');
+      showNotification(`Failed to clear database: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -403,7 +302,7 @@ export default function Papelitos() {
     }
   };
 
-  // Summary Metrics Calculation
+  // Summary Metrics Calculation (derived from cloud-loaded React state)
   const summaryStats = useMemo(() => {
     const totalRecords = papelitosList.length;
     let totalUnpaid = 0;
@@ -467,7 +366,7 @@ export default function Papelitos() {
     });
   };
 
-  // Search & Multi-Select Filter Logic
+  // Search & Multi-Select Filter Logic (derived from cloud-loaded React state)
   const filteredList = useMemo(() => {
     return papelitosList.filter(item => {
       // 1. Search Query (Name, Company, ID)
@@ -481,25 +380,12 @@ export default function Papelitos() {
 
       // 2. Multi-Select Filter Buttons
       if (selectedFilters.length > 0) {
-        const hasUnpaid = selectedFilters.includes('unpaid');
-        const hasPaid = selectedFilters.includes('paid');
-        const hasUnreturned = selectedFilters.includes('unreturned');
-        const hasReturned = selectedFilters.includes('returned');
-
-        // Payment status filter
-        if (hasUnpaid || hasPaid) {
-          const isUnpaidMatch = hasUnpaid && item.payment_status === 'Unpaid';
-          const isPaidMatch = hasPaid && item.payment_status === 'Paid';
-          if (!isUnpaidMatch && !isPaidMatch) return false;
-        }
-
-        // Papelitos status filter
-        if (hasUnreturned || hasReturned) {
-          const itemStatus = item.status === 'Returned' ? 'Returned' : 'Unreturned';
-          const isUnreturnedMatch = hasUnreturned && itemStatus === 'Unreturned';
-          const isReturnedMatch = hasReturned && itemStatus === 'Returned';
-          if (!isUnreturnedMatch && !isReturnedMatch) return false;
-        }
+        // Payment status filters (must match all selected payment filters)
+        if (selectedFilters.includes('unpaid') && item.payment_status !== 'Unpaid') return false;
+        if (selectedFilters.includes('paid') && item.payment_status !== 'Paid') return false;
+        // Papelitos status filters (must match all selected status filters)
+        if (selectedFilters.includes('unreturned') && item.status !== 'Unreturned') return false;
+        if (selectedFilters.includes('returned') && item.status !== 'Returned') return false;
       }
 
       return true;
@@ -623,10 +509,8 @@ export default function Papelitos() {
         if (error) throw error;
         savedData = data;
       } else {
-        const tempId = `p-${Date.now()}`;
         const insertPayload = {
           ...payload,
-          id: tempId,
           created_at: new Date().toISOString(),
           is_deleted: false
         };
@@ -654,13 +538,7 @@ export default function Papelitos() {
 
       setDbStatus('connected');
 
-      // Update Local State & Storage with confirmed data
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      const updatedLocal = editingRecord
-        ? localItems.map(item => item.id === savedData.id ? savedData : item)
-        : [savedData, ...localItems.filter(item => item.id !== savedData.id)];
-      setStoredItems('sgc_portal_local_papelitos', updatedLocal);
-
+      // Update React UI state with confirmed cloud data
       setPapelitosList(prev => {
         const exists = prev.some(item => item.id === savedData.id);
         if (exists) {
@@ -701,7 +579,6 @@ export default function Papelitos() {
       payment_status: formData.payment_status,
       status: computedStatus,
       remarks: formData.remarks.trim() || null,
-      id: `p-${Date.now()}`,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       is_deleted: false
@@ -709,7 +586,7 @@ export default function Papelitos() {
 
     try {
       let { data, error } = await supabase.from('papelitos').insert([insertPayload]).select().single();
-      
+
       if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
         const { is_deleted, ...payloadNoDeleted } = insertPayload;
         const fallback = await supabase
@@ -721,10 +598,8 @@ export default function Papelitos() {
         error = fallback.error;
       }
       if (error) throw error;
-      
+
       const savedData = data;
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      setStoredItems('sgc_portal_local_papelitos', [savedData, ...localItems]);
       setPapelitosList(prev => [savedData, ...prev]);
 
       addToVoucherQueue(savedData);
@@ -779,7 +654,6 @@ export default function Papelitos() {
       } else {
         const insertPayload = {
           ...payload,
-          id: `p-${Date.now()}`,
           created_at: new Date().toISOString(),
           is_deleted: false
         };
@@ -803,12 +677,6 @@ export default function Papelitos() {
       }
 
       setDbStatus('connected');
-
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      const updatedLocal = editingRecord
-        ? localItems.map(item => item.id === savedData.id ? savedData : item)
-        : [savedData, ...localItems.filter(item => item.id !== savedData.id)];
-      setStoredItems('sgc_portal_local_papelitos', updatedLocal);
 
       setPapelitosList(prev => {
         const exists = prev.some(item => item.id === savedData.id);
@@ -898,30 +766,22 @@ export default function Papelitos() {
       updated_at: nowIso
     };
 
+    setIsSaving(true);
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('papelitos')
         .update(updateData)
-        .in('id', recordIds);
+        .in('id', recordIds)
+        .select('*');
 
-      if (error) {
-        console.warn('Supabase update notice:', error.message);
-      }
-    } catch (err) {
-      console.error('Error marking paid:', err);
-    } finally {
-      // Update LocalStorage persistence so Paid status remains on refresh
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      const localMap = new Map();
-      localItems.forEach(item => localMap.set(item.id, item));
+      if (error) throw error;
 
-      recordsToUpdate.forEach(rec => {
-        const existing = localMap.get(rec.id) || rec;
-        localMap.set(rec.id, { ...existing, ...updateData });
-      });
-
-      setStoredItems('sgc_portal_local_papelitos', Array.from(localMap.values()));
-      setPapelitosList(prev => prev.map(item => recordIds.includes(item.id) ? { ...item, ...updateData } : item));
+      // React state is only a UI cache. Supabase remains the source of truth.
+      const updatedById = new Map((data || []).map(item => [item.id, item]));
+      setPapelitosList(prev =>
+        prev.map(item => updatedById.get(item.id) || item)
+      );
 
       recordIds.forEach(id => {
         logAudit('Mark as Paid', id, null, updateData);
@@ -930,13 +790,21 @@ export default function Papelitos() {
       showNotification(`Marked ${recordIds.length} Papelitos record(s) as Paid!`);
 
       if (shouldPrintVoucher) {
-        const updatedRecords = recordsToUpdate.map(r => ({ ...r, ...updateData }));
+        const updatedRecords = recordsToUpdate.map(r => ({
+          ...r,
+          ...(updatedById.get(r.id) || updateData)
+        }));
         await generateCashVoucherPDF(updatedRecords);
       }
 
       setShowPaidModal(false);
       setSelectedForAction(null);
       setSelectedIds([]);
+    } catch (error) {
+      console.error('Error marking paid:', error);
+      showNotification(`Failed to mark record(s) as Paid: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -953,33 +821,34 @@ export default function Papelitos() {
       updated_at: nowIso
     };
 
+    setIsSaving(true);
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('papelitos')
         .update(updateData)
-        .eq('id', recordId);
+        .eq('id', recordId)
+        .select('*')
+        .single();
 
-      if (error) {
-        console.warn('Supabase update returned notice:', error.message);
-      }
-    } catch (err) {
-      console.error('Error marking returned:', err);
-    } finally {
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      const localMap = new Map();
-      localItems.forEach(item => localMap.set(item.id, item));
-      const existing = localMap.get(recordId) || selectedForAction;
-      localMap.set(recordId, { ...existing, ...updateData });
+      if (error) throw error;
 
-      setStoredItems('sgc_portal_local_papelitos', Array.from(localMap.values()));
-      setPapelitosList(prev => prev.map(item => item.id === recordId ? { ...item, ...updateData } : item));
+      // React state is only a UI cache. Supabase remains the source of truth.
+      setPapelitosList(prev =>
+        prev.map(item => item.id === recordId ? data : item)
+      );
 
-      logAudit('Mark as Returned', recordId, selectedForAction, updateData);
+      await logAudit('Mark as Returned', recordId, selectedForAction, data);
       showNotification(`Papelitos record for "${selectedForAction.name}" marked as Returned!`);
 
       setShowReturnModal(false);
       setSelectedForAction(null);
       setReturnRemarksInput('');
+    } catch (error) {
+      console.error('Error marking returned:', error);
+      showNotification(`Failed to mark record as Returned: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -993,36 +862,31 @@ export default function Papelitos() {
       updated_at: new Date().toISOString()
     };
 
+    setIsSaving(true);
+
     try {
-      let { error } = await supabase
+      const { data, error } = await supabase
         .from('papelitos')
         .update(updateData)
-        .eq('id', recordId);
+        .eq('id', recordId)
+        .select('*')
+        .single();
 
-      if (error && error.message?.includes('is_deleted')) {
-        const delRes = await supabase
-          .from('papelitos')
-          .delete()
-          .eq('id', recordId);
-        error = delRes.error;
-      }
-    } catch (err) {
-      console.error('Delete error:', err);
-    } finally {
-      const localItems = getStoredItems('sgc_portal_local_papelitos');
-      const localMap = new Map();
-      localItems.forEach(item => localMap.set(item.id, item));
-      const existing = localMap.get(recordId) || selectedForAction;
-      localMap.set(recordId, { ...existing, ...updateData, is_deleted: true });
+      if (error) throw error;
 
-      setStoredItems('sgc_portal_local_papelitos', Array.from(localMap.values()));
+      // Remove only after Supabase confirms the archive/delete operation.
       setPapelitosList(prev => prev.filter(item => item.id !== recordId));
 
-      logAudit('Delete Record', recordId, selectedForAction, updateData);
+      await logAudit('Delete Record', recordId, selectedForAction, data);
       showNotification('Record removed from active view.');
 
       setShowDeleteModal(false);
       setSelectedForAction(null);
+    } catch (error) {
+      console.error('Delete error:', error);
+      showNotification(`Failed to delete record: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 

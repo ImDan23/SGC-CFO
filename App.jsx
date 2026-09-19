@@ -45,23 +45,7 @@ import PdfComparator from './PdfComparator'
 import Papelitos from './Papelitos'
 import './App.css'
 
-const getStoredItems = (key) => {
-  try {
-    const data = localStorage.getItem(key)
-    return data ? JSON.parse(data) : []
-  } catch (e) {
-    console.error('Error reading localStorage key ' + key, e)
-    return []
-  }
-}
 
-const setStoredItems = (key, items) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(items))
-  } catch (e) {
-    console.error('Error writing localStorage key ' + key, e)
-  }
-}
 
 const ALL_MODULES = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -80,7 +64,7 @@ const ALL_MODULES = [
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'classic')
+  const [theme, setTheme] = useState('classic')
   const [showAddModal, setShowAddModal] = useState(false)
   const [showCatModal, setShowCatModal] = useState(false)
   const [showDeptModal, setShowDeptModal] = useState(false)
@@ -161,7 +145,6 @@ function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('theme', theme)
   }, [theme])
 
   // Redirect if current active tab is restricted for currentUser
@@ -228,12 +211,7 @@ function App() {
       allowed_tabs: payload.allowed_tabs
     }
 
-    // 1. INSTANT OPTIMISTIC UI & LOCALSTORAGE UPDATE (0ms delay!)
-    const localUsers = getStoredItems('sgc_portal_local_users')
-    const updatedLocal = userFormData.id
-      ? localUsers.map(u => u.id === savedUserObj.id ? savedUserObj : u)
-      : [savedUserObj, ...localUsers.filter(u => u.id !== savedUserObj.id)]
-    setStoredItems('sgc_portal_local_users', updatedLocal)
+
 
     setUsers(prev => {
       const exists = prev.some(u => u.id === savedUserObj.id)
@@ -279,8 +257,6 @@ function App() {
         } catch (ae) { }
       }
 
-      const localUsers = getStoredItems('sgc_portal_local_users').filter(u => u.id !== userId)
-      setStoredItems('sgc_portal_local_users', localUsers)
       setUsers(prev => prev.filter(u => u.id !== userId))
 
       if (currentUser?.id === userId) {
@@ -317,38 +293,21 @@ function App() {
   }
 
   const fetchLookups = async () => {
-    let remoteCats = []
-    let remoteDepts = []
     try {
       const { data: catData } = await supabase.from('categories').select('*').order('name')
       const { data: deptData } = await supabase.from('departments').select('*').order('name')
-      remoteCats = catData || []
-      remoteDepts = deptData || []
+      const finalCats = catData || []
+      const finalDepts = deptData || []
+      setCategories(finalCats)
+      setDepartments(finalDepts)
+      setFormData(prev => ({
+        ...prev,
+        category_id: prev.category_id || finalCats[0]?.id || '',
+        department_id: prev.department_id || finalDepts[0]?.id || ''
+      }))
     } catch (error) {
       console.error('Error fetching lookups:', error)
     }
-
-    const localCats = getStoredItems('sgc_portal_local_categories')
-    const localDepts = getStoredItems('sgc_portal_local_departments')
-
-    const mergedCatsMap = new Map()
-    remoteCats.forEach(c => mergedCatsMap.set(c.id, c))
-    localCats.forEach(c => mergedCatsMap.set(c.id, c))
-    const finalCats = Array.from(mergedCatsMap.values())
-
-    const mergedDeptsMap = new Map()
-    remoteDepts.forEach(d => mergedDeptsMap.set(d.id, d))
-    localDepts.forEach(d => mergedDeptsMap.set(d.id, d))
-    const finalDepts = Array.from(mergedDeptsMap.values())
-
-    setCategories(finalCats)
-    setDepartments(finalDepts)
-
-    setFormData(prev => ({
-      ...prev,
-      category_id: prev.category_id || finalCats[0]?.id || '',
-      department_id: prev.department_id || finalDepts[0]?.id || ''
-    }))
   }
 
   const fetchAllData = async () => {
@@ -430,19 +389,9 @@ function App() {
     } catch (error) {
       console.error('Error fetching data:', error.message)
     } finally {
-      const localSystems = getStoredItems('sgc_portal_local_systems')
-      const mergedSystemsMap = new Map()
-      remoteSystems.forEach(s => mergedSystemsMap.set(s.id, s))
-      localSystems.forEach(s => mergedSystemsMap.set(s.id, s))
-      const finalSystems = Array.from(mergedSystemsMap.values())
-      setSystems(finalSystems)
+      setSystems(remoteSystems)
 
-      const localUsers = getStoredItems('sgc_portal_local_users')
-      const mergedUsersMap = new Map()
-      remoteUsers.forEach(u => mergedUsersMap.set(u.id, u))
-      localUsers.forEach(u => mergedUsersMap.set(u.id, u))
-      let finalUsers = Array.from(mergedUsersMap.values())
-
+      let finalUsers = remoteUsers
       if (finalUsers.length === 0) {
         const defaultAdmin = {
           id: 'admin-default',
@@ -460,9 +409,9 @@ function App() {
       setAuditLogs(remoteLogs)
 
       setStats([
-        { label: 'Total Systems', value: finalSystems.length.toString(), icon: <Database size={20} />, color: 'var(--accent-primary)' },
-        { label: 'Active Now', value: finalSystems.filter(s => s.status === 'active').length.toString(), icon: <ShieldCheck size={20} />, color: '#22c55e' },
-        { label: 'Incidents', value: finalSystems.filter(s => s.status === 'critical').length.toString(), icon: <Bell size={20} />, color: '#ef4444' },
+        { label: 'Total Systems', value: remoteSystems.length.toString(), icon: <Database size={20} />, color: 'var(--accent-primary)' },
+        { label: 'Active Now', value: remoteSystems.filter(s => s.status === 'active').length.toString(), icon: <ShieldCheck size={20} />, color: '#22c55e' },
+        { label: 'Incidents', value: remoteSystems.filter(s => s.status === 'critical').length.toString(), icon: <Bell size={20} />, color: '#ef4444' },
         { label: 'System Health', value: '96%', icon: <BarChart3 size={20} />, color: '#8b5cf6' },
       ])
 
@@ -498,13 +447,6 @@ function App() {
       category_id: systemData.category_id,
       department_id: systemData.department_id
     }
-
-    // 1. INSTANT OPTIMISTIC UI & LOCALSTORAGE UPDATE (0ms delay!)
-    const localSystems = getStoredItems('sgc_portal_local_systems')
-    const updatedLocal = formData.id
-      ? localSystems.map(s => s.id === formattedSys.id ? formattedSys : s)
-      : [formattedSys, ...localSystems.filter(s => s.id !== formattedSys.id)]
-    setStoredItems('sgc_portal_local_systems', updatedLocal)
 
     setSystems(prev => {
       const exists = prev.some(s => s.id === formattedSys.id)
@@ -572,8 +514,6 @@ function App() {
       console.warn('Delete system error:', dbErr)
     }
 
-    const localSystems = getStoredItems('sgc_portal_local_systems').filter(s => s.id !== id)
-    setStoredItems('sgc_portal_local_systems', localSystems)
     setSystems(prev => prev.filter(s => s.id !== id))
   };
 
@@ -595,8 +535,6 @@ function App() {
       newCatObj = { id: 'cat-' + Date.now(), name: newCatName }
     }
 
-    const localCats = getStoredItems('sgc_portal_local_categories')
-    setStoredItems('sgc_portal_local_categories', [newCatObj, ...localCats.filter(c => c.id !== newCatObj.id)])
     await fetchLookups()
     setFormData(prev => ({ ...prev, category_id: newCatObj.id }))
     setNewCatName('')
