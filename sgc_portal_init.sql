@@ -110,14 +110,16 @@ INSERT INTO roles (name, description) VALUES
 ('Super Admin', 'Full system access including user management and audit deletion'),
 ('System Admin', 'Manage systems directory and view audit logs'),
 ('Operator', 'Update system status and maintenance notes'),
-('Viewer', 'Read-only access to system directory');
+('Viewer', 'Read-only access to system directory')
+ON CONFLICT (name) DO NOTHING;
 
 -- Initial Categories
 INSERT INTO categories (name, description) VALUES 
 ('Internal', 'Applications used exclusively within the corporate network'),
 ('Client Facing', 'Portals and APIs accessible by customers'),
 ('Infrastructure', 'Core network, storage, and server systems'),
-('Operations', 'Tools for managing day-to-day business processes');
+('Operations', 'Tools for managing day-to-day business processes')
+ON CONFLICT (name) DO NOTHING;
 
 -- Initial Departments
 INSERT INTO departments (name, head_of_dept) VALUES 
@@ -125,42 +127,14 @@ INSERT INTO departments (name, head_of_dept) VALUES
 ('HR Dept', 'Sarah Miller'),
 ('Sales', 'David Wilson'),
 ('Accounting', 'Linda Garcia'),
-('Engineering', 'James Smith');
+('Engineering', 'James Smith')
+ON CONFLICT (name) DO NOTHING;
 
--- Sample User
-INSERT INTO users (email, password, full_name, status) VALUES 
-('admin@sgc.com', 'admin123', 'System Administrator', 'active');
+-- Sample User (Skipped)
+-- Link User to Role (Skipped)
 
--- Link User to Role
-INSERT INTO user_roles (user_id, role_id) 
-SELECT u.id, r.id FROM users u, roles r 
-WHERE u.email = 'admin@sgc.com' AND r.name = 'Super Admin';
-
--- Sample Systems
-INSERT INTO systems (name, description, category_id, department_id, status, uptime_percentage) 
-VALUES 
-('HR Management System', 'Centralized employee database and payroll management.', 
- (SELECT id FROM categories WHERE name = 'Internal'), 
- (SELECT id FROM departments WHERE name = 'HR Dept'), 'active', 99.9),
-
-('Customer Portal', 'External facing portal for customer support and orders.', 
- (SELECT id FROM categories WHERE name = 'Client Facing'), 
- (SELECT id FROM departments WHERE name = 'Sales'), 'active', 99.8),
-
-('Inventory Controller', 'Real-time tracking of warehouse stock and shipments.', 
- (SELECT id FROM categories WHERE name = 'Operations'), 
- (SELECT id FROM departments WHERE name = 'IT Operations'), 'maintenance', 94.5),
-
-('Cloud Storage API', 'Core storage API for all internal applications.', 
- (SELECT id FROM categories WHERE name = 'Infrastructure'), 
- (SELECT id FROM departments WHERE name = 'Engineering'), 'active', 99.99);
-
--- Sample Papelitos Records
-INSERT INTO papelitos (name, company_name, quantity, date_received, payment_status, status, remarks)
-VALUES
-('Juan Dela Cruz', 'LDN Express', 5, CURRENT_DATE - INTERVAL '2 days', 'Unpaid', 'Unreturned', 'Batch shipment papers'),
-('Maria Santos', '5A ROYAL', 12, CURRENT_DATE - INTERVAL '5 days', 'Paid', 'Unreturned', 'Cleared via bank transfer'),
-('Pedro Penduko', 'IMPERIAL Logistics', 3, CURRENT_DATE - INTERVAL '10 days', 'Unpaid', 'Unreturned', 'Pending invoice verification');
+-- Sample Systems (Skipped to avoid duplicates)
+-- Sample Papelitos (Skipped to avoid duplicates)
 
 
 

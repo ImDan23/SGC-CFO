@@ -157,13 +157,14 @@ export default function Papelitos() {
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Form State & Validation
+  // Note: 'Active' maps to 'Unreturned' in the UI. The live DB constraint only allows 'Active', 'Paid', 'Returned'.
   const [formData, setFormData] = useState({
     name: '',
     company_name: '',
     quantity: 1,
     date_received: new Date().toISOString().split('T')[0],
     payment_status: 'Unpaid',
-    status: 'Unreturned',
+    status: 'Active',
     remarks: ''
   });
   const [formErrors, setFormErrors] = useState({});
@@ -384,7 +385,8 @@ export default function Papelitos() {
         if (selectedFilters.includes('unpaid') && item.payment_status !== 'Unpaid') return false;
         if (selectedFilters.includes('paid') && item.payment_status !== 'Paid') return false;
         // Papelitos status filters (must match all selected status filters)
-        if (selectedFilters.includes('unreturned') && item.status !== 'Unreturned') return false;
+        // 'Active' is the DB value for records that are not yet returned (displayed as 'Unreturned')
+        if (selectedFilters.includes('unreturned') && item.status === 'Returned') return false;
         if (selectedFilters.includes('returned') && item.status !== 'Returned') return false;
       }
 
@@ -428,7 +430,7 @@ export default function Papelitos() {
       quantity: 1,
       date_received: new Date().toISOString().split('T')[0],
       payment_status: 'Unpaid',
-      status: 'Returned',
+      status: 'Active',
       remarks: ''
     });
     setFormErrors({});
@@ -444,7 +446,7 @@ export default function Papelitos() {
       quantity: record.quantity || 1,
       date_received: record.date_received || new Date().toISOString().split('T')[0],
       payment_status: record.payment_status || 'Unpaid',
-      status: record.status === 'Returned' ? 'Returned' : 'Unreturned',
+      status: record.status === 'Returned' ? 'Returned' : 'Active',
       remarks: record.remarks || ''
     });
     setFormErrors({});
@@ -476,7 +478,8 @@ export default function Papelitos() {
     if (!validateForm()) return;
     setIsSaving(true);
 
-    const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Unreturned';
+    // Map 'Active' (stored in formData for "not yet returned") to 'Active' for the DB
+    const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Active';
 
     const payload = {
       name: formData.name.trim(),
@@ -569,7 +572,7 @@ export default function Papelitos() {
     if (!validateForm()) return;
     setIsSaving(true);
 
-    const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Unreturned';
+    const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Active';
 
     const insertPayload = {
       name: formData.name.trim(),
@@ -627,7 +630,7 @@ export default function Papelitos() {
     if (!validateForm()) return;
     setIsSaving(true);
 
-    const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Unreturned';
+    const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Active';
 
     const payload = {
       name: formData.name.trim(),
@@ -2441,7 +2444,7 @@ export default function Papelitos() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <button
                     type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, status: 'Unreturned' }))}
+                    onClick={() => setFormData(prev => ({ ...prev, status: 'Active' }))}
                     style={{
                       padding: '0.6rem 1rem',
                       display: 'flex',
