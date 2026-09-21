@@ -137,6 +137,36 @@
   --glass-border: rgba(255, 255, 255, 0.05);
 }
 
+[data-theme='burgundy'] {
+  --bg-primary: #3b0716;
+  --bg-secondary: #580a21;
+  --bg-tertiary: #750d2c;
+  --accent-primary: #9f1239;
+  --accent-secondary: #be123c;
+  --accent-glow: rgba(159, 18, 57, 0.3);
+  --text-main: #ffe4e6;
+  --text-muted: #fecdd3;
+  --text-dim: #fda4af;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --glass-bg: rgba(88, 10, 33, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='pink'] {
+  --bg-primary: #fff0f6;
+  --bg-secondary: #ffe4e6;
+  --bg-tertiary: #fbcfe8;
+  --accent-primary: #db2777;
+  --accent-secondary: #f472b6;
+  --accent-glow: rgba(219, 39, 119, 0.3);
+  --text-main: #831843;
+  --text-muted: #9d174d;
+  --text-dim: #be185d;
+  --border-color: rgba(219, 39, 119, 0.2);
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(219, 39, 119, 0.15);
+}
+
 * {
   margin: 0;
   padding: 0;

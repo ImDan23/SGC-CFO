@@ -19,7 +19,9 @@ export default function Settings({ theme, onThemeChange }) {
               { id: 'sunset', label: 'Sunset Orange' },
               { id: 'ocean', label: 'Ocean Teal' },
               { id: 'amethyst', label: 'Amethyst Purple' },
-              { id: 'fern', label: 'Fern Green' }
+              { id: 'fern', label: 'Fern Green' },
+              { id: 'burgundy', label: 'Burgundy Wine' },
+              { id: 'pink', label: 'Blossom Pink' }
             ].map(t => (
               <button
                 key={t.id}
