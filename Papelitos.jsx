@@ -157,7 +157,8 @@ export default function Papelitos() {
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Form State & Validation
-  // Note: 'Active' maps to 'Unreturned' in the UI. The live DB constraint only allows 'Active', 'Paid', 'Returned'.
+  // status in formData: 'Unreturned' (not yet returned) | 'Returned'
+  // 'Unreturned' matches the DB column default and CHECK constraint.
   const [formData, setFormData] = useState({
     name: '',
     company_name: '',
@@ -387,10 +388,11 @@ export default function Papelitos() {
         // Payment status filters (must match all selected payment filters)
         if (selectedFilters.includes('unpaid') && item.payment_status !== 'Unpaid') return false;
         if (selectedFilters.includes('paid') && item.payment_status !== 'Paid') return false;
-        // Papelitos status filters (must match all selected status filters)
-        // 'Active' is the DB value for records that are not yet returned (displayed as 'Unreturned')
-        if (selectedFilters.includes('unreturned') && item.status === 'Returned') return false;
-        if (selectedFilters.includes('returned') && item.status !== 'Returned') return false;
+        // Papelitos status filters
+        // Treat both 'Unreturned' and legacy 'Active' as unreturned for backward compatibility
+        const isReturned = item.status === 'Returned';
+        if (selectedFilters.includes('unreturned') && isReturned) return false;
+        if (selectedFilters.includes('returned') && !isReturned) return false;
       }
 
       return true;
@@ -433,7 +435,7 @@ export default function Papelitos() {
       quantity: 1,
       date_received: new Date().toISOString().split('T')[0],
       payment_status: 'Unpaid',
-      status: 'Active',
+      status: 'Unreturned',
       remarks: ''
     });
     setFormErrors({});
@@ -449,7 +451,8 @@ export default function Papelitos() {
       quantity: record.quantity || 1,
       date_received: record.date_received || new Date().toISOString().split('T')[0],
       payment_status: record.payment_status || 'Unpaid',
-      status: record.status === 'Returned' ? 'Returned' : 'Active',
+      // Normalize both 'Active' (legacy) and 'Unreturned' to 'Unreturned' in the form
+      status: record.status === 'Returned' ? 'Returned' : 'Unreturned',
       remarks: record.remarks || ''
     });
     setFormErrors({});
@@ -481,26 +484,9 @@ export default function Papelitos() {
     if (!validateForm()) return;
     setIsSaving(true);
 
-    // Map 'Active' (stored in formData for "not yet returned") to 'Active' for the DB
+    // 'Unreturned' is the canonical DB value for records not yet returned.
+    // Use 'Active' for unreturned status to match the live database check constraint
     const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Active';
-
-    const payload = {
-      name: formData.name.trim(),
-      company_name: formData.company_name.trim(),
-      quantity: Number(formData.quantity),
-      date_received: formData.date_received,
-      payment_status: formData.payment_status,
-      status: computedStatus,
-      remarks: formData.remarks.trim() || null,
-      updated_at: new Date().toISOString()
-    };
-
-    if (formData.payment_status === 'Paid' && !editingRecord?.date_paid) {
-      payload.date_paid = new Date().toISOString();
-    }
-    if (formData.status === 'Returned' && !editingRecord?.date_returned) {
-      payload.date_returned = new Date().toISOString();
-    }
 
     try {
       let savedData;
@@ -510,9 +496,21 @@ export default function Papelitos() {
         if (!UUID_RE.test(editingRecord.id)) {
           throw new Error(`Cannot update record with non-UUID id: ${editingRecord.id}`);
         }
+        
         const { data, error } = await supabase
           .from('papelitos')
-          .update(payload)
+          .update({
+            name: formData.name.trim(),
+            company_name: formData.company_name.trim(),
+            quantity: Number(formData.quantity),
+            date_received: formData.date_received,
+            payment_status: formData.payment_status,
+            status: computedStatus,
+            remarks: formData.remarks.trim() || null,
+            updated_at: new Date().toISOString(),
+            ...(formData.payment_status === 'Paid' && !editingRecord?.date_paid ? { date_paid: new Date().toISOString() } : {}),
+            ...(computedStatus === 'Returned' && !editingRecord?.date_returned ? { date_returned: new Date().toISOString() } : {})
+          })
           .eq('id', editingRecord.id)
           .select()
           .single();
@@ -520,26 +518,26 @@ export default function Papelitos() {
         if (error) throw error;
         savedData = data;
       } else {
-        // Only include is_deleted/created_at if the table supports them;
-        // start without them and fall back if the column error occurs.
+        // Only include core columns for insert to prevent 400 errors if optional columns are missing
         let { data, error } = await supabase
           .from('papelitos')
-          .insert([payload])
+          .insert([{
+            name: formData.name.trim(),
+            company_name: formData.company_name.trim(),
+            quantity: Number(formData.quantity),
+            date_received: formData.date_received,
+            payment_status: formData.payment_status,
+            status: computedStatus,
+            remarks: formData.remarks.trim() || null
+          }])
           .select()
           .single();
 
-        if (error && (error.message?.includes('is_deleted') || error.message?.includes('created_at') || error.code === '42703')) {
-          // Table doesn't have those extra columns — retry with plain payload
-          const fallback = await supabase
-            .from('papelitos')
-            .insert([payload])
-            .select()
-            .single();
-          data = fallback.data;
-          error = fallback.error;
+        if (error) {
+          // If even the base insert fails (e.g., missing table entirely), we throw
+          throw error;
         }
 
-        if (error) throw error;
         savedData = data;
       }
 
@@ -557,14 +555,27 @@ export default function Papelitos() {
 
       setShowAddEditModal(false);
       showNotification(editingRecord ? 'Record updated successfully!' : 'New Papelitos record created successfully!');
-      logAudit(editingRecord ? 'Update Record' : 'Create Record', savedData.id, editingRecord, payload);
+      
+      // Construct log payload based on action
+      const logData = {
+        name: formData.name.trim(),
+        company_name: formData.company_name.trim(),
+        quantity: Number(formData.quantity),
+        date_received: formData.date_received,
+        payment_status: formData.payment_status,
+        status: computedStatus,
+        remarks: formData.remarks.trim() || null
+      };
+      
+      logAudit(editingRecord ? 'Update Record' : 'Create Record', savedData.id, editingRecord, logData);
 
       if (formData.payment_status === 'Paid') {
         generateCashVoucherPDF([savedData]);
       }
     } catch (error) {
       console.error('Error saving data directly to online database:', error);
-      showNotification(`Failed to save to database: ${error.message || 'Unknown error'}`, 'error');
+      const errStr = `${error.message || 'Unknown'} | details: ${error.details || 'none'} | hint: ${error.hint || 'none'}`;
+      showNotification(`Failed to save to database: ${errStr}`, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -578,29 +589,17 @@ export default function Papelitos() {
 
     const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Active';
 
-    const insertPayload = {
-      name: formData.name.trim(),
-      company_name: formData.company_name.trim(),
-      quantity: Number(formData.quantity),
-      date_received: formData.date_received,
-      payment_status: formData.payment_status,
-      status: computedStatus,
-      remarks: formData.remarks.trim() || null,
-      updated_at: new Date().toISOString()
-    };
-
     try {
-      let { data, error } = await supabase.from('papelitos').insert([insertPayload]).select().single();
+      let { data, error } = await supabase.from('papelitos').insert([{
+        name: formData.name.trim(),
+        company_name: formData.company_name.trim(),
+        quantity: Number(formData.quantity),
+        date_received: formData.date_received,
+        payment_status: formData.payment_status,
+        status: computedStatus,
+        remarks: formData.remarks.trim() || null
+      }]).select().single();
 
-      if (error && (error.message?.includes('is_deleted') || error.message?.includes('created_at') || error.code === '42703')) {
-        const fallback = await supabase
-          .from('papelitos')
-          .insert([insertPayload])
-          .select()
-          .single();
-        data = fallback.data;
-        error = fallback.error;
-      }
       if (error) throw error;
 
       const savedData = data;
@@ -619,7 +618,8 @@ export default function Papelitos() {
       setDbStatus('connected');
     } catch (error) {
       console.error('Error saving data directly to online database:', error);
-      showNotification(`Failed to save to database: ${error.message || 'Unknown error'}`, 'error');
+      const errStr = `${error.message || 'Unknown'} | details: ${error.details || 'none'} | hint: ${error.hint || 'none'}`;
+      showNotification(`Failed to save to database: ${errStr}`, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -633,23 +633,21 @@ export default function Papelitos() {
 
     const computedStatus = formData.status === 'Returned' ? 'Returned' : 'Active';
 
-    const payload = {
-      name: formData.name.trim(),
-      company_name: formData.company_name.trim(),
-      quantity: Number(formData.quantity),
-      date_received: formData.date_received,
-      payment_status: formData.payment_status,
-      status: computedStatus,
-      remarks: formData.remarks.trim() || null,
-      updated_at: new Date().toISOString()
-    };
-
     try {
       let savedData;
       if (editingRecord) {
         const { data, error } = await supabase
           .from('papelitos')
-          .update(payload)
+          .update({
+            name: formData.name.trim(),
+            company_name: formData.company_name.trim(),
+            quantity: Number(formData.quantity),
+            date_received: formData.date_received,
+            payment_status: formData.payment_status,
+            status: computedStatus,
+            remarks: formData.remarks.trim() || null,
+            updated_at: new Date().toISOString()
+          })
           .eq('id', editingRecord.id)
           .select()
           .single();
@@ -658,18 +656,17 @@ export default function Papelitos() {
       } else {
         let { data, error } = await supabase
           .from('papelitos')
-          .insert([payload])
+          .insert([{
+            name: formData.name.trim(),
+            company_name: formData.company_name.trim(),
+            quantity: Number(formData.quantity),
+            date_received: formData.date_received,
+            payment_status: formData.payment_status,
+            status: computedStatus,
+            remarks: formData.remarks.trim() || null
+          }])
           .select()
           .single();
-        if (error && (error.message?.includes('is_deleted') || error.message?.includes('created_at') || error.code === '42703')) {
-          const fallback = await supabase
-            .from('papelitos')
-            .insert([payload])
-            .select()
-            .single();
-          data = fallback.data;
-          error = fallback.error;
-        }
         if (error) throw error;
         savedData = data;
       }
@@ -696,7 +693,8 @@ export default function Papelitos() {
       }
     } catch (error) {
       console.error('Error saving data directly to online database:', error);
-      showNotification(`Failed to save to database: ${error.message || 'Unknown error'}`, 'error');
+      const errStr = `${error.message || 'Unknown'} | details: ${error.details || 'none'} | hint: ${error.hint || 'none'}`;
+      showNotification(`Failed to save to database: ${errStr}`, 'error');
     } finally {
       setIsSaving(false);
     }
