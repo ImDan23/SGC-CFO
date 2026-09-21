@@ -238,7 +238,10 @@ export default function Papelitos() {
         }
       } else {
         setDbStatus('connected');
-        remoteData = data || [];
+        // Filter out any stale local-only records with non-UUID ids (e.g. "p-<timestamp>")
+        // to prevent 400 errors when Supabase tries to cast them to UUID.
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        remoteData = (data || []).filter(row => UUID_RE.test(row.id));
         fetchedOk = true;
       }
     } catch (err) {
@@ -502,6 +505,11 @@ export default function Papelitos() {
     try {
       let savedData;
       if (editingRecord) {
+        // Guard: only update records with valid UUIDs
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!UUID_RE.test(editingRecord.id)) {
+          throw new Error(`Cannot update record with non-UUID id: ${editingRecord.id}`);
+        }
         const { data, error } = await supabase
           .from('papelitos')
           .update(payload)
@@ -512,23 +520,19 @@ export default function Papelitos() {
         if (error) throw error;
         savedData = data;
       } else {
-        const insertPayload = {
-          ...payload,
-          created_at: new Date().toISOString(),
-          is_deleted: false
-        };
-
+        // Only include is_deleted/created_at if the table supports them;
+        // start without them and fall back if the column error occurs.
         let { data, error } = await supabase
           .from('papelitos')
-          .insert([insertPayload])
+          .insert([payload])
           .select()
           .single();
 
-        if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
-          const { is_deleted, ...payloadNoDeleted } = insertPayload;
+        if (error && (error.message?.includes('is_deleted') || error.message?.includes('created_at') || error.code === '42703')) {
+          // Table doesn't have those extra columns — retry with plain payload
           const fallback = await supabase
             .from('papelitos')
-            .insert([payloadNoDeleted])
+            .insert([payload])
             .select()
             .single();
           data = fallback.data;
@@ -582,19 +586,16 @@ export default function Papelitos() {
       payment_status: formData.payment_status,
       status: computedStatus,
       remarks: formData.remarks.trim() || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      is_deleted: false
+      updated_at: new Date().toISOString()
     };
 
     try {
       let { data, error } = await supabase.from('papelitos').insert([insertPayload]).select().single();
 
-      if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
-        const { is_deleted, ...payloadNoDeleted } = insertPayload;
+      if (error && (error.message?.includes('is_deleted') || error.message?.includes('created_at') || error.code === '42703')) {
         const fallback = await supabase
           .from('papelitos')
-          .insert([payloadNoDeleted])
+          .insert([insertPayload])
           .select()
           .single();
         data = fallback.data;
@@ -655,21 +656,15 @@ export default function Papelitos() {
         if (error) throw error;
         savedData = data;
       } else {
-        const insertPayload = {
-          ...payload,
-          created_at: new Date().toISOString(),
-          is_deleted: false
-        };
         let { data, error } = await supabase
           .from('papelitos')
-          .insert([insertPayload])
+          .insert([payload])
           .select()
           .single();
-        if (error && (error.message?.includes('is_deleted') || error.code === '42703')) {
-          const { is_deleted, ...payloadNoDeleted } = insertPayload;
+        if (error && (error.message?.includes('is_deleted') || error.message?.includes('created_at') || error.code === '42703')) {
           const fallback = await supabase
             .from('papelitos')
-            .insert([payloadNoDeleted])
+            .insert([payload])
             .select()
             .single();
           data = fallback.data;
