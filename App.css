@@ -114,13 +114,13 @@
 
 /* Sidebar overlay backdrop */
 .sidebar-overlay {
-  display: none;
+  display: auto;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(2px);
   z-index: 150;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 0.3s ease;
 }
 
