@@ -114,18 +114,22 @@
 
 /* Sidebar overlay backdrop */
 .sidebar-overlay {
-  display: none;
+  display: block;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(2px);
   z-index: 150;
   opacity: 0;
+  pointer-events: none;
+  /* ← never blocks taps when hidden */
   transition: opacity 0.3s ease;
 }
 
 .sidebar-overlay.visible {
   opacity: 1;
+  pointer-events: auto;
+  /* ← only intercepts taps when menu is open */
 }
 
 .nav-links {
@@ -449,11 +453,25 @@
   padding: 4px;
   border-radius: 4px;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  /* ensures a comfortable tap target */
+  min-height: 32px;
+  touch-action: manipulation;
+  /* removes 300ms tap delay on mobile */
+  -webkit-tap-highlight-color: transparent;
 }
 
 .icon-btn:hover {
   background: rgba(0, 0, 0, 0.05);
   color: white;
+}
+
+.icon-btn:active {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(0.92);
 }
 
 /* Audit View */
@@ -822,8 +840,11 @@
   border-color: #ef4444;
 }
 
-/* Responsive adjustments */
+/* ------------------------------------------------------------------
+   Responsive adjustments (mobile ≤ 768px)
+------------------------------------------------------------------ */
 @media (max-width: 768px) {
+
   /* Show hamburger button */
   .mobile-menu-btn {
     display: flex;
@@ -839,17 +860,29 @@
     transform: translateX(-100%);
     width: min(var(--sidebar-width), 85vw);
     box-shadow: var(--shadow-lg);
+    z-index: 300;
+    /* above overlay */
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .sidebar.sidebar-open {
     transform: translateX(0);
   }
 
+  /* Nav items – bigger tap targets on mobile */
+  .nav-item {
+    padding: 0.85rem 1rem;
+    min-height: 48px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   /* Main content takes full width on mobile */
   .main-content {
     margin-left: 0 !important;
-    padding: 1rem 1rem 1rem 1rem;
-    padding-top: 4rem; /* room for hamburger button */
+    padding: 1rem;
+    padding-top: 4.5rem;
+    /* room for hamburger button */
   }
 
   /* Page header stacks on mobile */
@@ -884,6 +917,33 @@
     align-items: stretch;
   }
 
+  /* Toolbar action buttons – stack nicely & easy to tap */
+  .toolbar-actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .toolbar-actions .btn {
+    flex: 1;
+    justify-content: center;
+    min-height: 40px;
+    touch-action: manipulation;
+  }
+
+  /* Icon buttons – larger tap zone on mobile */
+  .icon-btn {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 8px;
+  }
+
+  /* Buttons – ensure min tap target per WCAG */
+  .btn {
+    min-height: 40px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   .login-card {
     margin: 0 1rem;
     max-width: 100%;
@@ -897,12 +957,18 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
+
+  /* Table action cells – easier to tap on mobile */
+  .system-table tr td:last-child {
+    white-space: nowrap;
+  }
 }
 
 @media (orientation: portrait) {
   .system-card {
     flex-direction: column;
   }
+
   .system-card-header {
     flex-direction: column;
     align-items: flex-start;
@@ -913,6 +979,7 @@
   .dashboard-grid {
     grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
   }
+
   .system-grid {
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   }
